@@ -24,20 +24,14 @@ Afterwards, restart Home Assistant and add the integration under
 The poll interval (default 360 seconds) can be changed under the integration's **Configure** button.
 The address, password, CAN node and connections can be changed later with **Reconfigure** in the entry's menu.
 
-Each BL-NET (or each CAN node of it) becomes a device holding all its values,
-the digital outputs as switches and the inputs as sensors:
-
 ![The device of a BL-NET with its switches and sensors](https://raw.githubusercontent.com/PyBLNET/ha_blnet/master/docs/device.png)
 
-## Several UVR1611 behind one BL-NET
-
-Add the integration once per UVR1611, with the same address and the CAN node of that UVR1611.
-Each CAN node becomes its own device. The BL-NET is only asked about one node at a time.
+Multiple BL-NET connections, e.g. for multiple CAN nodes on the same device or multiple devices, can be added by adding additional configurations.
+Note that the direct connection always reads the data the BL-NET logs, whatever the CAN node.
 
 ![One BL-NET set up for two CAN nodes](https://raw.githubusercontent.com/PyBLNET/ha_blnet/master/docs/integration.png)
 
-The CAN node selects what is read via the web interface.
-The direct connection always reads the data the BL-NET logs, whatever the CAN node.
+
 
 ## Moving from configuration.yaml
 
@@ -45,13 +39,6 @@ Setting the integration up in `configuration.yaml` is deprecated.
 A `blnet:` entry there is imported into the UI on the next start, with the same settings,
 and the existing entities keep their entity ids and history.
 Afterwards, Home Assistant asks you to remove the `blnet:` entry from `configuration.yaml`.
-
-## A few notes
-
-- Customization is fully supported.
-- All entities of a BL-NET (or of one of its CAN nodes) belong to one device.
-- Digital outputs of the UVR1611 can be controlled via created switch entities.
-- __Turning a switch off or on overrides the `AUTO` configuration and sets the switch to `HAND` until it is turned back to `AUTO` manually.__
 
 ## Contributions
 
