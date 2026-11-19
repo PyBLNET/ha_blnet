@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- case: front side, then top face over it -->
+  <rect x="28" y="112" width="456" height="300" rx="48" fill="#c9c9c3" stroke="#a9a9a2" stroke-width="6"/>
+  <rect x="28" y="100" width="456" height="236" rx="48" fill="#efefea" stroke="#b5b5ae" stroke-width="6"/>
+  <!-- push-push card slot with arrow -->
+  <rect x="70" y="140" width="128" height="72" rx="14" fill="none" stroke="#6f6f6a" stroke-width="10"/>
+  <path d="M100 176 H156 M140 158 L162 176 L140 194" fill="none" stroke="#6f6f6a" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- START button -->
+  <circle cx="256" cy="262" r="30" fill="#f4c430" stroke="#c99a12" stroke-width="6"/>
+  <!-- status LEDs -->
+  <circle cx="404" cy="168" r="18" fill="#a3281d"/>
+  <circle cx="404" cy="226" r="18" fill="#2f9e4f"/>
+  <!-- front: network port, DL and CAN terminal blocks, USB -->
+  <rect x="62" y="348" width="62" height="46" rx="6" fill="#2d2d2b"/>
+  <rect x="80" y="380" width="26" height="14" fill="#c9c9c3"/>
+  <rect x="144" y="350" width="106" height="44" rx="6" fill="#2f7fd1"/>
+  <rect x="258" y="350" width="106" height="44" rx="6" fill="#2f7fd1"/>
+  <rect x="390" y="352" width="54" height="40" rx="6" fill="#efefea" stroke="#6f6f6a" stroke-width="6"/>
+</svg>
