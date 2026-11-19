@@ -1,236 +1,99 @@
-"""
-Connect to a BL-NET via it's web interface and read and write data
+"""Switches of the digital outputs of the UVR1611, via the web interface of the BL-NET."""
+from __future__ import annotations
 
-Switch to control digital outputs
-"""
-import logging
+from typing import Any
 
-from homeassistant.const import (
-    STATE_UNKNOWN,
-    STATE_OFF,
-    STATE_ON,
-)
+from homeassistant.components.switch import SwitchEntity
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-try:
-    from homeassistant.components.switch import SwitchEntity
-except ImportError:
-    from homeassistant.components.switch import SwitchDevice as SwitchEntity
-
-_LOGGER = logging.getLogger(__name__)
-
-DOMAIN = 'blnet'
-
-MODE = 'mode'
-FRIENDLY_NAME = 'friendly_name'
+from .const import DIGITAL
+from .coordinator import BLNETConfigEntry, BLNETCoordinator
+from .entity import BLNETEntity, new_values, unique_id
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Set up the BLNET component"""
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: BLNETConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Add an output and a mode switch for every digital output."""
+    coordinator = entry.runtime_data
+    if not coordinator.use_web:
+        # outputs can only be set via the web interface, they are sensors then
+        return
+    known: set[tuple[str, int]] = set()
 
-    if discovery_info is None:
-        _LOGGER.error("No BL-Net communication configured")
-        return False
+    @callback
+    def add_new_switches() -> None:
+        new = new_values(coordinator, (DIGITAL,), known)
+        async_add_entities(
+            entity
+            for _, value_id in new
+            for entity in (
+                BLNETSwitch(coordinator, DIGITAL, value_id),
+                BLNETModeSwitch(coordinator, DIGITAL, value_id),
+            )
+        )
 
-    switch_id = discovery_info['id']
-    blnet_id = discovery_info['blnet_id']
-    name = discovery_info['name']
-    comm = hass.data['DATA_{}'.format(DOMAIN)]
-
-    add_devices([BLNETSwitch(switch_id, blnet_id, name, comm),
-                 BLNETModeSwitch(switch_id, blnet_id, name, comm)], True)
-    return True
+    add_new_switches()
+    entry.async_on_unload(coordinator.async_add_listener(add_new_switches))
 
 
-class BLNETSwitch(SwitchEntity):
-    """
-    Representation of a switch that toggles a digital output of the UVR1611.
-    """
-
-    def __init__(self, switch_id, blnet_id, name, comm):
-        """Initialize the switch."""
-        self._blnet_id = blnet_id
-        self._id = switch_id
-        self.communication = comm
-        self._name = name
-        self._friendly_name = name
-        self._state = STATE_UNKNOWN
-        self._assumed_state = True
-        self._icon = None
-        self._mode = STATE_UNKNOWN
-        self._last_updated = None
+class BLNETSwitch(BLNETEntity, SwitchEntity):
+    """Switch a digital output on or off, this sets it to manual (HAND) mode."""
 
     @property
-    def unique_id(self):
-        """Home assist requires a unique ID property."""
-        return f"blnet_switch_{self._id}"
-    
-    def update(self):
-        """Get the latest data from communication device """
-        # check if new data has arrived
-        last_blnet_update = self.communication.last_updated()
-
-        if last_blnet_update == self._last_updated:
-            return
-
-        sensor_data = self.communication.data.get(self._blnet_id)
-
-        if sensor_data is None:
-            return
-
-        self._friendly_name = sensor_data.get('friendly_name')
-        if sensor_data.get('value') == "EIN":
-            self._state = STATE_ON
-            self._icon = 'mdi:flash'
-        # Nonautomated switch, toggled off => switch off
-        else:
-            self._state = STATE_OFF
-            self._icon = 'mdi:flash-off'
-        self._mode = sensor_data.get('mode')
-
-        self._last_updated = last_blnet_update
-        self._assumed_state = False
+    def name(self) -> str:
+        return self.value_name
 
     @property
-    def name(self):
-        """Return the name of the switch."""
-        return self._name
+    def is_on(self) -> bool:
+        return (self.blnet_value or {}).get("value") == "EIN"
 
     @property
-    def state(self):
-        """Return the state of the device."""
-        return self._state
+    def icon(self) -> str:
+        return "mdi:flash" if self.is_on else "mdi:flash-off"
 
     @property
-    def icon(self):
-        """Return the state of the device."""
-        return self._icon
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"mode": (self.blnet_value or {}).get("mode")}
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_digital("on", self._value_id)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_digital("off", self._value_id)
+
+
+class BLNETModeSwitch(BLNETEntity, SwitchEntity):
+    """On if the UVR1611 controls a digital output (AUTO), off if it is set manually (HAND)."""
+
+    def __init__(self, coordinator: BLNETCoordinator, domain: str, value_id: int) -> None:
+        super().__init__(coordinator, domain, value_id)
+        self._attr_unique_id = mode_unique_id(coordinator.config_entry.entry_id, value_id)
 
     @property
-    def device_state_attributes(self):
-        """Return the state attributes of the device."""
-        attrs = {}
-
-        attrs[MODE] = self._mode
-        attrs[FRIENDLY_NAME] = self._friendly_name
-        return attrs
+    def name(self) -> str:
+        return f"{self.value_name} automated"
 
     @property
-    def is_on(self):
-        """Return true if device is on."""
-        return self._state == STATE_ON
-
-    def turn_on(self, **kwargs):
-        """Turn the device on."""
-        self.communication.turn_on(self._id)
-        self._state = STATE_ON
-        self._assumed_state = True
-
-    def turn_off(self, **kwargs):
-        """Turn the device off."""
-        self.communication.turn_off(self._id)
-        self._state = STATE_OFF
-        self._assumed_state = True
+    def is_on(self) -> bool:
+        return (self.blnet_value or {}).get("mode") != "HAND"
 
     @property
-    def assumed_state(self) -> bool:
-        return self._assumed_state
+    def icon(self) -> str:
+        return "mdi:cog" if self.is_on else "mdi:cog-off"
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_digital("auto", self._value_id)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        # keep the output as it is, but control it manually
+        action = "on" if (self.blnet_value or {}).get("value") == "EIN" else "off"
+        await self.coordinator.async_set_digital(action, self._value_id)
 
 
-class BLNETModeSwitch(SwitchEntity):
-    """
-    Representation of a switch that toggles the operation mode
-    of a digital output of the UVR1611. On means automated
-    """
-
-    def __init__(self, switch_id, blnet_id, name, comm):
-        """Initialize the switch."""
-        self._blnet_id = blnet_id
-        self._id = switch_id
-        self.communication = comm
-        self._name = name
-        self._friendly_name = name
-        self._state = STATE_UNKNOWN
-        self._activated = self._state
-        self._assumed_state = True
-        self._icon = None
-        self._last_updated = None
-
-    @property
-    def unique_id(self):
-        """Return a unique ID for the mode switch."""
-        return f"blnet_mode_switch_{self._id}"
-    
-    def update(self):
-        """Get the latest data from communication device """
-        # check if new data has arrived
-        last_blnet_update = self.communication.last_updated()
-
-        if last_blnet_update == self._last_updated:
-            return
-
-        sensor_data = self.communication.data.get(self._blnet_id)
-
-        if sensor_data is None:
-            return
-
-        self._friendly_name = "{} automated".format(
-            sensor_data.get('friendly_name'))
-        if sensor_data.get('mode') == 'HAND':
-            self._state = STATE_OFF
-            self._icon = 'mdi:cog-off'
-        else:
-            self._state = STATE_ON
-            self._icon = 'mdi:cog'
-        
-        self._activated = sensor_data.get('value')
-
-        self._last_updated = last_blnet_update
-        self._assumed_state = False
-
-    @property
-    def name(self):
-        """Return the name of the switch."""
-        return self._name
-
-    @property
-    def state(self):
-        """Return the state of the device."""
-        return self._state
-
-    @property
-    def icon(self):
-        """Return the state of the device."""
-        return self._icon
-
-    @property
-    def device_state_attributes(self):
-        """Return the state attributes of the device."""
-        attrs = {}
-        attrs[FRIENDLY_NAME] = self._friendly_name
-        return attrs
-
-    @property
-    def is_on(self):
-        """Return true if device is on."""
-        return self._state
-
-    def turn_on(self, **kwargs):
-        """Turn the device on."""
-        self.communication.turn_auto(self._id)
-        self._state = STATE_ON
-        self._assumed_state = True
-
-    def turn_off(self, **kwargs):
-        """Turn the device off, in this case meaning to turn off automation,
-        an sending a HAND/EIN or HAND/AUS turn manual control on."""
-
-        if self._activated == "EIN":
-            self.communication.turn_on(self._id)
-        else:
-            self.communication.turn_off(self._id)
-        self._state = STATE_OFF
-        self._assumed_state = True
-
-    @property
-    def assumed_state(self)->bool:
-        return self._assumed_state
+def mode_unique_id(entry_id: str, value_id: int | str) -> str:
+    """Unique id of the mode switch of a digital output."""
+    return f"{unique_id(entry_id, DIGITAL, value_id)}_mode"

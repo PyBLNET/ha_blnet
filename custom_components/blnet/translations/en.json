@@ -1,0 +1,42 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to a BL-NET",
+        "data": {
+          "resource": "Address",
+          "password": "Password",
+          "can_node": "CAN node",
+          "use_web": "Use the web interface",
+          "web_port": "Web interface port",
+          "use_ta": "Use the direct connection",
+          "ta_port": "Direct connection port"
+        },
+        "data_description": {
+          "resource": "Address of the BL-NET, e.g. http://192.168.1.10",
+          "password": "Password of the Expert user, if one is set",
+          "can_node": "CAN node of the UVR1611 to read, leave empty to keep the one set on the BL-NET",
+          "use_web": "Needed to name the values and to switch digital outputs",
+          "use_ta": "Reads speed, power and energy values"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No BL-NET answered at this address.",
+      "no_connection": "Use the web interface, the direct connection or both.",
+      "unknown": "Unexpected error, see the logs."
+    },
+    "abort": {
+      "already_configured": "This BL-NET is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "scan_interval": "Poll interval (seconds)"
+        }
+      }
+    }
+  }
+}

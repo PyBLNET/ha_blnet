@@ -9,56 +9,35 @@ via the BLNET web-interface into home assistant.
 
 Add this repository to [hacs](https://hacs.xyz/) or copy the `custom_component/blnet` file structure into your custom_component directory .
 
-Afterwards, add these lines to your `configuration.yaml`:
+Afterwards, restart Home Assistant and add the integration under
+**Settings → Devices & services → Add integration → BLNET**. Enter
 
-      # UVR1611 Data
-      blnet:
-        resource: your_blnet_address
-        password: optional_blnet_password
-        can_node: optional_can_bus_node
-        scan_interval: optional_scan_interval_seconds
+- the address of your BL-NET, e.g. `http://192.168.1.10`,
+- the password of the "Expert" user, if one is set,
+- optionally the CAN node of the UVR1611 to read (left empty, the one set on the BL-NET is used),
+- whether to use the web interface (needed to name values and to switch outputs) and the direct connection (reads speed, power and energy values), and their ports.
 
-**Password hint:** The component tries to log in as "Expert" (so enter its password here if it is set).
-
-There *is* the option to enable usage of the `ta_direct` protocal, which is however not properly working yet.
+The poll interval (default 360 seconds) can be changed under the integration's **Configure** button.
 
 The result:
 
 ![Configured groups containing all available BLNet-supplied sensors](https://github.com/user-attachments/assets/e7028fdb-66aa-466f-9be0-22894f422e57)
 
-## Example configuration
+## Moving from configuration.yaml
 
-```yaml
-# Configuration for the BLNET component
-blnet:
-  # Host address of your blnet
-  resource: http://192.168.255.255
-  # Poll interval in seconds (Optional, Default: 360)
-  scan_interval: 360
-  # Expert access password of the web-interface (Optional, Default: None)
-  password: "1234"
-  # Enable BLNet-Direct access (Broken, Optional, Default: False)
-  use_ta: false
-  # BLNet-Direct port (Optional, Default: 4000)
-  ta_port: 4000
-  # Enable Web interface access (Optional, Default: True)
-  # When set to false, switches are configured as sensors
-  use_web: true
-  # Webinterface port (Optional, Default: 80)
-  web_port: 80
-  # Can-Node to be used (Optional, Default: None - doesn't change the current setting at the BLNET)
-  can_node: 20
-```
+Setting the integration up in `configuration.yaml` is deprecated.
+A `blnet:` entry there is imported into the UI on the next start, with the same settings,
+and the existing entities keep their entity ids and history.
+Afterwards, Home Assistant asks you to remove the `blnet:` entry from `configuration.yaml`.
 
 ## A few notes
 
 - Customization is fully supported.
-- Grouping has to be manually accomplished.
+- All entities belong to one BL-NET device.
 - Digital outputs of the UVR1611 can be controlled via created switch entities.
 - __Turning a switch off or on overrides the `AUTO` configuration and sets the switch to `HAND` until it is turned back to `AUTO` manually.__
-- If the password is all numbers and start with a leading zero, add quotes around the password. If the quotes are omitted, the leading 0 is discarded and the password will not be correct.
 
 ## Contributions
 
 Feel free to open Pull Requests here or at
-the backend python script [pyblnet](https://github.com/nielstron/pyblnet).
+the backend python script [pyblnet](https://github.com/PyBLNET/pyblnet).

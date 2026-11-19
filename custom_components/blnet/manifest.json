@@ -1,11 +1,16 @@
 {
   "domain": "blnet",
   "name": "BLNET",
-  "documentation": "https://github.com/nielstron/ha_blnet/blob/master/README.md",
+  "codeowners": [
+    "@nielstron"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/PyBLNET/ha_blnet/blob/master/README.md",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
   "requirements": [
     "pyblnet==0.12.0"
   ],
-  "dependencies": [],
-  "codeowners": ["@nielstron"],
   "version": "0.12.0"
 }

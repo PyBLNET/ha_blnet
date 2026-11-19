@@ -1,55 +1,45 @@
-"""
-Connect to a BL-NET via it's web interface and read and write data
-"""
+"""Read and control a UVR1611 via a BL-NET."""
+from __future__ import annotations
+
 import logging
-from datetime import datetime, timedelta
+import re
 
 import voluptuous as vol
+
+from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.const import (
-    CONF_RESOURCE, CONF_PASSWORD, CONF_SCAN_INTERVAL, UnitOfTemperature,
+    CONF_PASSWORD,
+    CONF_RESOURCE,
+    CONF_SCAN_INTERVAL,
+    Platform,
 )
-from homeassistant.helpers.discovery import load_platform
-from homeassistant.helpers.event import async_track_time_interval
-import homeassistant.helpers.config_validation as cv
+from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN, HomeAssistant, callback
+from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv, entity_registry as er, issue_registry as ir
+from homeassistant.helpers.typing import ConfigType
+
+from .const import (
+    CONF_NODE,
+    CONF_TA_PORT,
+    CONF_USE_TA,
+    CONF_USE_WEB,
+    CONF_WEB_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_TA_PORT,
+    DEFAULT_WEB_PORT,
+    DIGITAL,
+    DOMAIN,
+)
+from .coordinator import BLNETConfigEntry, BLNETCoordinator, create_blnet
+from .entity import unique_id
+from .switch import mode_unique_id
 
 _LOGGER = logging.getLogger(__name__)
-DOMAIN = 'blnet'
 
-# Configuration constants
-CONF_WEB_PORT = 'web_port'
-CONF_TA_PORT = 'ta_port'
-CONF_USE_WEB = 'use_web'
-CONF_USE_TA = 'use_ta'
-CONF_NODE = 'can_node'
+PLATFORMS = [Platform.SENSOR, Platform.SWITCH]
 
-# Defaults
-DEFAULT_WEB_PORT = 80
-DEFAULT_TA_PORT = 40000
-DEFAULT_SCAN_INTERVAL = 360
-
-# Unit and icon mappings
-UNIT_MAPPINGS = {
-    'analog': UnitOfTemperature.CELSIUS,
-    'speed': 'rpm',
-    'power': 'kW',
-    'energy': 'kWh'
-}
-
-ICON_MAPPINGS = {
-    'analog': 'mdi:thermometer',
-    'speed': 'mdi:speedometer',
-    'power': 'mdi:power-plug',
-    'energy': 'mdi:power-plug'
-}
-
-# Icons of analog inputs by the input type pyblnet reports
-TYPE_ICON_MAPPINGS = {
-    'temperature': 'mdi:thermometer',
-    'volume_flow': 'mdi:water-pump',
-    'radiation': 'mdi:white-balance-sunny',
-    'digital': 'mdi:toggle-switch',
-}
-
+# The configuration.yaml setup, imported into a config entry
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Required(CONF_RESOURCE): cv.url,
@@ -63,274 +53,95 @@ CONFIG_SCHEMA = vol.Schema({
     }),
 }, extra=vol.ALLOW_EXTRA)
 
+# Unique ids of the entities set up from configuration.yaml
+LEGACY_UNIQUE_ID = re.compile(
+    r"blnet_sensor_blnet (?P<domain>\w+) (?P<id>\d+)"
+    r"|blnet_(?P<mode>mode_)?switch_(?P<switch_id>\d+)"
+)
 
-def setup(hass, config):
-    """Set up the BLNET component."""
-    from pyblnet import BLNET
 
-    # Extract configuration
-    conf = config[DOMAIN]
-    resource = conf.get(CONF_RESOURCE)
-    password = conf.get(CONF_PASSWORD)
-    can_node = conf.get(CONF_NODE)
-    scan_interval = conf.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-    web_port = conf.get(CONF_WEB_PORT, DEFAULT_WEB_PORT)
-    ta_port = conf.get(CONF_TA_PORT, DEFAULT_TA_PORT)
-    use_web = conf.get(CONF_USE_WEB, True)
-    use_ta = conf.get(CONF_USE_TA, False)
-
-    _LOGGER.debug(
-        f"Setting up BLNET with: resource={resource}, web_port={web_port}, "
-        f"ta_port={ta_port}, use_web={use_web}, use_ta={use_ta}"
-    )
-
-    blnet_connector = BLNETConnector(
-        resource=resource,
-        password=password,
-        web_port=web_port,
-        ta_port=ta_port,
-        use_web=use_web,
-        use_ta=use_ta
-    )
-    
-    try:
-        blnet = blnet_connector.connect()
-    except (ValueError, AssertionError) as ex:
-        _LOGGER.error(f"Could not connect to BLNET at {resource}: {ex}")
-        return False
-
-    # Initialize the data handler
-    data_handler = BLNETDataHandler(blnet, can_node, hass, conf)
-    hass.data[f"DATA_{DOMAIN}"] = data_handler
-
-    # Set up periodic updates
-    update_handler = BLNETUpdateHandler(hass, data_handler, scan_interval)
-    update_handler.schedule_updates()
-
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Import the BL-NET set up in configuration.yaml."""
+    if DOMAIN in config:
+        # the imported entry can only be set up once this returns
+        hass.async_create_task(_async_import(hass, dict(config[DOMAIN])))
     return True
 
 
-def _default_name(domain, sensor_id):
-    """Name values that the BL-NET reports without one (direct connection only)."""
-    return f'{domain} {sensor_id}'
-
-
-def _icon(domain, sensor):
-    """Pick the icon of a value, by its input type if pyblnet reports one."""
-    if domain == 'analog':
-        return TYPE_ICON_MAPPINGS.get(sensor.get('type'), ICON_MAPPINGS['analog'])
-    return ICON_MAPPINGS[domain]
-
-
-class BLNETConnector:
-    """Handles connection to BLNET device."""
-    
-    def __init__(self, resource, password=None, web_port=DEFAULT_WEB_PORT,
-                 ta_port=DEFAULT_TA_PORT, use_web=True, use_ta=False):
-        """Initialize the connector with explicit parameters."""
-        self.resource = resource
-        self.password = password
-        self.web_port = web_port
-        self.ta_port = ta_port
-        self.use_web = use_web
-        self.use_ta = use_ta
-
-    def connect(self):
-        """Create and return BLNET connection."""
-        from pyblnet import BLNET
-        return BLNET(
-            self.resource,
-            password=self.password,
-            web_port=self.web_port,
-            ta_port=self.ta_port,
-            use_web=self.use_web,
-            use_ta=self.use_ta
+async def _async_import(hass: HomeAssistant, yaml_config: dict) -> None:
+    """Import configuration.yaml and ask to remove it from there."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_IMPORT}, data=yaml_config
+    )
+    if (
+        result["type"] is FlowResultType.CREATE_ENTRY
+        or result.get("reason") == "already_configured"
+    ):
+        ir.async_create_issue(
+            hass,
+            HOMEASSISTANT_DOMAIN,
+            f"deprecated_yaml_{DOMAIN}",
+            breaks_in_ha_version=None,
+            is_fixable=False,
+            issue_domain=DOMAIN,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="deprecated_yaml",
+            translation_placeholders={"domain": DOMAIN, "integration_title": "BLNET"},
         )
 
-    def get_error_message(self, exception, resource):
-        """Generate appropriate error message."""
-        if isinstance(exception, ValueError):
-            return f"No BL-Net reached at {resource}"
-        return f"Configuration invalid: {exception}"
+
+async def async_setup_entry(hass: HomeAssistant, entry: BLNETConfigEntry) -> bool:
+    """Connect to the BL-NET and set up its entities."""
+    try:
+        blnet = await hass.async_add_executor_job(create_blnet, dict(entry.data))
+    except (ValueError, AssertionError, OSError) as err:
+        raise ConfigEntryNotReady(f"No BL-NET reached at {entry.data[CONF_RESOURCE]}") from err
+
+    coordinator = BLNETCoordinator(hass, entry, blnet)
+    await coordinator.async_config_entry_first_refresh()
+    entry.runtime_data = coordinator
+
+    _migrate_legacy_entities(hass, entry)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_reload))
+    return True
 
 
-class BLNETDataHandler:
-    """Handles data operations for BLNET."""
-
-    def __init__(self, blnet, node, hass, config):
-        """Initialize the data handler."""
-        self.blnet = blnet
-        self.node = node
-        self.data = {}
-        self._last_updated = None
-        self._hass = hass
-        self._config = config
-        self.sensors = set()
-
-    def last_updated(self):
-        """Return the timestamp of the last update."""
-        return self._last_updated
-
-    def turn_off(self, switch_id):
-        """Turn off a switch."""
-        _LOGGER.debug(f"Turning off switch {switch_id}")
-        try:
-            self.blnet.turn_off(switch_id, self.node)
-            return True
-        except Exception as ex:
-            _LOGGER.error(f"Error turning off switch {switch_id}: {ex}")
-            return False
-
-    def turn_on(self, switch_id):
-        """Turn on a switch."""
-        _LOGGER.debug(f"Turning on switch {switch_id}")
-        try:
-            self.blnet.turn_on(switch_id, self.node)
-            return True
-        except Exception as ex:
-            _LOGGER.error(f"Error turning on switch {switch_id}: {ex}")
-            return False
-
-    def turn_auto(self, switch_id):
-        """Set switch to auto mode."""
-        _LOGGER.debug(f"Setting switch {switch_id} to auto mode")
-        try:
-            self.blnet.turn_auto(switch_id, self.node)
-            return True
-        except Exception as ex:
-            _LOGGER.error(f"Error setting switch {switch_id} to auto: {ex}")
-            return False
-
-    def update(self):
-        """Update all data and handle sensor discovery."""
-        self._last_updated = datetime.now()
-        data = self._fetch_data()
-        self._update_sensor_data(data)
-        self._discover_new_devices(data)
-        return data
-
-    def _fetch_data(self):
-        """Fetch raw data from BLNET device."""
-        return self.blnet.fetch(self.node)
-
-    def _update_sensor_data(self, data):
-        """Update data for existing sensors."""
-        _LOGGER.info("Updating sensor data...")
-        self._update_domain_sensors(data)
-        self._update_digital_sensors(data)
-
-    def _update_domain_sensors(self, data):
-        """Update sensors for all domains."""
-        for domain in ['analog', 'speed', 'power', 'energy']:
-            for key, sensor in data.get(domain, {}).items():
-                self._update_single_sensor(domain, key, sensor)
-
-    def _update_single_sensor(self, domain, key, sensor):
-        """Update a single sensor's attributes."""
-        entity_id = f'{DOMAIN} {domain} {key}'
-        self.data[entity_id] = {
-            'value': sensor.get('value'),
-            'unit_of_measurement': sensor.get('unit_of_measurement', UNIT_MAPPINGS[domain]),
-            'friendly_name': sensor.get('name') or _default_name(domain, key),
-            'icon': _icon(domain, sensor)
-        }
-
-    def _update_digital_sensors(self, data):
-        """Update digital sensors."""
-        for key, sensor in data.get('digital', {}).items():
-            entity_id = f'{DOMAIN} digital {key}'
-            self.data[entity_id] = {
-                'friendly_name': sensor.get('name') or _default_name('digital', key),
-                'mode': sensor.get('mode'),
-                'value': sensor.get('value')
-            }
-
-    def _discover_new_devices(self, data):
-        """Handle discovery of new devices."""
-        added_count = self._discover_sensors(data)
-        added_count += self._discover_digital_devices(data)
-        if added_count > 0:
-            _LOGGER.info(f"Added {added_count} new devices")
-
-    def _discover_sensors(self, data):
-        """Discover and add new sensors."""
-        added_count = 0
-        for domain in ['analog', 'speed', 'power', 'energy']:
-            for sensor_id in data.get(domain, {}):
-                if self._add_single_sensor(domain, sensor_id, data):
-                    added_count += 1
-        return added_count
-
-    def _add_single_sensor(self, domain, sensor_id, data):
-        """Add a single new sensor."""
-        name = data[domain][sensor_id].get('name') or _default_name(domain, sensor_id)
-        blnet_id = '{} {} {}'.format(DOMAIN, domain, sensor_id)
-        if blnet_id in self.sensors:
-            return False
-
-        self.sensors.add(blnet_id)
-        _LOGGER.info(f"Discovered {domain} sensor {sensor_id} in use, adding")
-
-        disc_info = {
-            'name': name,
-            'domain': domain,
-            'id': sensor_id,
-            'friendly_name': name,
-            'blnet_id': blnet_id
-        }
-        _LOGGER.debug(f"Sensor data for {domain}[{sensor_id}]: {data[domain][sensor_id]} - Disc info: {disc_info}")
-        load_platform(self._hass, 'sensor', DOMAIN, disc_info, self._config)
-        return True
-
-    def _discover_digital_devices(self, data):
-        """Discover and add new digital devices."""
-        added_count = 0
-        for sensor_id in data.get('digital', {}):
-            if self._add_digital_device(sensor_id, data):
-                added_count += 1
-        return added_count
-
-    def _add_digital_device(self, sensor_id, data):
-        """Add a single new digital device."""
-        name = data['digital'][sensor_id].get('name') or _default_name('digital', sensor_id)
-        blnet_id = '{} digital {}'.format(DOMAIN, sensor_id)
-        if blnet_id in self.sensors:
-            return False
-
-        self.sensors.add(blnet_id)
-        _LOGGER.info(f"Discovered digital sensor {sensor_id} in use, adding")
-
-        disc_info = {
-            'name': name,
-            'domain': 'digital',
-            'id': sensor_id,
-            'friendly_name': name,
-            'blnet_id': blnet_id
-        }
-        component = 'switch' if self._config[CONF_USE_WEB] else 'sensor'
-        load_platform(self._hass, component, DOMAIN, disc_info, self._config)
-        return True
+async def async_unload_entry(hass: HomeAssistant, entry: BLNETConfigEntry) -> bool:
+    """Unload the entities of a BL-NET."""
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-class BLNETUpdateHandler:
-    """Handles periodic updates for BLNET."""
+async def _async_reload(hass: HomeAssistant, entry: BLNETConfigEntry) -> None:
+    """Apply changed options."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
-    def __init__(self, hass, data_handler, scan_interval):
-        self.hass = hass
-        self.data_handler = data_handler
-        self.scan_interval = scan_interval
 
-    def schedule_updates(self):
-        """Schedule periodic updates."""
-        def fetch_data(*_):
-            return self.data_handler.update()
+@callback
+def _migrate_legacy_entities(hass: HomeAssistant, entry: BLNETConfigEntry) -> None:
+    """Hand the entities set up from configuration.yaml to the config entry.
 
-        # Initial update
-        fetch_data()
-        
-        # Schedule periodic updates
-        async_track_time_interval(
-            self.hass,
-            fetch_data,
-            timedelta(seconds=self.scan_interval)
+    They keep their entity ids, names and history.
+    """
+    registry = er.async_get(hass)
+    for registry_entry in list(registry.entities.values()):
+        if registry_entry.platform != DOMAIN or registry_entry.config_entry_id is not None:
+            continue
+        match = LEGACY_UNIQUE_ID.fullmatch(registry_entry.unique_id)
+        if match is None:
+            continue
+        if match["switch_id"] is not None:
+            if match["mode"]:
+                new_unique_id = mode_unique_id(entry.entry_id, match["switch_id"])
+            else:
+                new_unique_id = unique_id(entry.entry_id, DIGITAL, match["switch_id"])
+        else:
+            new_unique_id = unique_id(entry.entry_id, match["domain"], match["id"])
+        if registry.async_get_entity_id(registry_entry.domain, DOMAIN, new_unique_id):
+            continue
+        _LOGGER.info("Moving %s to the BL-NET set up in the UI", registry_entry.entity_id)
+        registry.async_update_entity(
+            registry_entry.entity_id,
+            new_unique_id=new_unique_id,
+            config_entry_id=entry.entry_id,
         )
