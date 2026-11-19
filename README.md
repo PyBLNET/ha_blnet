@@ -7,7 +7,7 @@ via the BLNET web-interface into home assistant.
 
 ## Installation
 
-Add this repository to [hacs](https://hacs.xyz/) or copy the `custom_component/blnet` file structure into your custom_component directory .
+Add this repository to [hacs](https://hacs.xyz/) or copy the `custom_components/blnet` file structure into your custom_component directory .
 
 Afterwards, restart Home Assistant and add the integration under
 **Settings → Devices & services → Add integration → BLNET**. Enter
@@ -18,10 +18,22 @@ Afterwards, restart Home Assistant and add the integration under
 - whether to use the web interface (needed to name values and to switch outputs) and the direct connection (reads speed, power and energy values), and their ports.
 
 The poll interval (default 360 seconds) can be changed under the integration's **Configure** button.
+The address, password, CAN node and connections can be changed later with **Reconfigure** in the entry's menu.
 
-The result:
+Each BL-NET (or each CAN node of it) becomes a device holding all its values,
+the digital outputs as switches and the inputs as sensors:
 
-![Configured groups containing all available BLNet-supplied sensors](https://github.com/user-attachments/assets/e7028fdb-66aa-466f-9be0-22894f422e57)
+![The device of a BL-NET with its switches and sensors](https://raw.githubusercontent.com/PyBLNET/ha_blnet/master/docs/device.png)
+
+## Several UVR1611 behind one BL-NET
+
+Add the integration once per UVR1611, with the same address and the CAN node of that UVR1611.
+Each CAN node becomes its own device. The BL-NET is only asked about one node at a time.
+
+![One BL-NET set up for two CAN nodes](https://raw.githubusercontent.com/PyBLNET/ha_blnet/master/docs/integration.png)
+
+The CAN node selects what is read via the web interface.
+The direct connection always reads the data the BL-NET logs, whatever the CAN node.
 
 ## Moving from configuration.yaml
 
@@ -33,7 +45,7 @@ Afterwards, Home Assistant asks you to remove the `blnet:` entry from `configura
 ## A few notes
 
 - Customization is fully supported.
-- All entities belong to one BL-NET device.
+- All entities of a BL-NET (or of one of its CAN nodes) belong to one device.
 - Digital outputs of the UVR1611 can be controlled via created switch entities.
 - __Turning a switch off or on overrides the `AUTO` configuration and sets the switch to `HAND` until it is turned back to `AUTO` manually.__
 
