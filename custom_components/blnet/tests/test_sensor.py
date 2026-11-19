@@ -134,5 +134,77 @@ class TestBLNETConnector(unittest.TestCase):
         )
 
 
+class TestBLNETDataHandlerUpdate(unittest.TestCase):
+    """Test update() on data shaped like pyblnet's BLNET.fetch()."""
+
+    # Values read only via the direct connection (use_web: false) have no name
+    TA_ONLY_DATA = {
+        'analog': {
+            1: {'value': 21.3, 'type': 'temperature', 'unit_of_measurement': '°C'},
+            2: {'value': 300.0, 'type': 'volume_flow', 'unit_of_measurement': 'l/h'},
+            3: {'value': 512.0, 'type': 'radiation', 'unit_of_measurement': 'W/m²'},
+        },
+        'digital': {1: {'value': '1'}, 2: {'value': '0'}},
+        'speed': {1: {'value': 30, 'unit_of_measurement': None}},
+        'energy': {1: {'value': 12.3, 'unit_of_measurement': 'kWh'}},
+        'power': {1: {'value': 1.2, 'unit_of_measurement': 'kW'}},
+    }
+
+    def _update(self, data, use_web):
+        blnet = Mock()
+        blnet.fetch.return_value = data
+        handler = BLNETDataHandler(blnet, None, Mock(), {'use_web': use_web})
+        with patch('custom_components.blnet.load_platform') as load_platform:
+            handler.update()
+            # values that are already set up are not added again
+            handler.update()
+        return handler, load_platform
+
+    def test_update_direct_only(self):
+        """Every value gets an entity, even without a name."""
+        handler, load_platform = self._update(self.TA_ONLY_DATA, use_web=False)
+
+        self.assertEqual(load_platform.call_count, 8)
+        added = {call.args[3]['blnet_id']: call for call in load_platform.call_args_list}
+        self.assertEqual(set(added), set(handler.data))
+        # digital values are read-only sensors without the web interface
+        self.assertEqual(added['blnet digital 1'].args[1], 'sensor')
+        self.assertEqual(added['blnet speed 1'].args[3]['name'], 'speed 1')
+
+        self.assertEqual(handler.data['blnet analog 1'], {
+            'value': 21.3,
+            'unit_of_measurement': '°C',
+            'friendly_name': 'analog 1',
+            'icon': 'mdi:thermometer',
+        })
+        self.assertEqual(handler.data['blnet analog 2']['icon'], 'mdi:water-pump')
+        self.assertEqual(handler.data['blnet analog 3']['icon'], 'mdi:white-balance-sunny')
+        self.assertEqual(handler.data['blnet energy 1']['unit_of_measurement'], 'kWh')
+        self.assertEqual(handler.data['blnet digital 2']['value'], '0')
+
+    def test_update_web_same_names(self):
+        """Values sharing a name in the web interface each get an entity."""
+        data = {
+            'analog': {
+                1: {'id': '1', 'name': 'T.Speicher', 'value': '55.0',
+                    'unit_of_measurement': '°C', 'type': 'temperature'},
+                2: {'id': '2', 'name': 'T.Speicher', 'value': '40.0',
+                    'unit_of_measurement': '°C', 'type': 'temperature'},
+                3: {'id': '3', 'name': 'Schalter', 'value': '1',
+                    'unit_of_measurement': None, 'type': 'digital'},
+            },
+            'digital': {1: {'id': '1', 'name': 'Pumpe', 'mode': 'AUTO', 'value': 'EIN'}},
+            'speed': {}, 'energy': {}, 'power': {},
+        }
+        handler, load_platform = self._update(data, use_web=True)
+
+        self.assertEqual(load_platform.call_count, 4)
+        self.assertEqual(handler.data['blnet analog 2']['friendly_name'], 'T.Speicher')
+        self.assertEqual(handler.data['blnet analog 3']['icon'], 'mdi:toggle-switch')
+        switch = [c for c in load_platform.call_args_list if c.args[3]['domain'] == 'digital']
+        self.assertEqual(switch[0].args[1], 'switch')
+        self.assertEqual(handler.data['blnet digital 1']['mode'], 'AUTO')
+
+
 if __name__ == '__main__':
     unittest.main() 

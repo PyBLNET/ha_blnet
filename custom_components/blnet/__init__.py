@@ -12,8 +12,6 @@ from homeassistant.helpers.discovery import load_platform
 from homeassistant.helpers.event import async_track_time_interval
 import homeassistant.helpers.config_validation as cv
 
-REQUIREMENTS = ['pyblnet==0.9.3']
-
 _LOGGER = logging.getLogger(__name__)
 DOMAIN = 'blnet'
 
@@ -42,6 +40,14 @@ ICON_MAPPINGS = {
     'speed': 'mdi:speedometer',
     'power': 'mdi:power-plug',
     'energy': 'mdi:power-plug'
+}
+
+# Icons of analog inputs by the input type pyblnet reports
+TYPE_ICON_MAPPINGS = {
+    'temperature': 'mdi:thermometer',
+    'volume_flow': 'mdi:water-pump',
+    'radiation': 'mdi:white-balance-sunny',
+    'digital': 'mdi:toggle-switch',
 }
 
 CONFIG_SCHEMA = vol.Schema({
@@ -102,6 +108,18 @@ def setup(hass, config):
     update_handler.schedule_updates()
 
     return True
+
+
+def _default_name(domain, sensor_id):
+    """Name values that the BL-NET reports without one (direct connection only)."""
+    return f'{domain} {sensor_id}'
+
+
+def _icon(domain, sensor):
+    """Pick the icon of a value, by its input type if pyblnet reports one."""
+    if domain == 'analog':
+        return TYPE_ICON_MAPPINGS.get(sensor.get('type'), ICON_MAPPINGS['analog'])
+    return ICON_MAPPINGS[domain]
 
 
 class BLNETConnector:
@@ -213,8 +231,8 @@ class BLNETDataHandler:
         self.data[entity_id] = {
             'value': sensor.get('value'),
             'unit_of_measurement': sensor.get('unit_of_measurement', UNIT_MAPPINGS[domain]),
-            'friendly_name': sensor.get('name'),
-            'icon': ICON_MAPPINGS[domain]
+            'friendly_name': sensor.get('name') or _default_name(domain, key),
+            'icon': _icon(domain, sensor)
         }
 
     def _update_digital_sensors(self, data):
@@ -222,7 +240,7 @@ class BLNETDataHandler:
         for key, sensor in data.get('digital', {}).items():
             entity_id = f'{DOMAIN} digital {key}'
             self.data[entity_id] = {
-                'friendly_name': sensor.get('name'),
+                'friendly_name': sensor.get('name') or _default_name('digital', key),
                 'mode': sensor.get('mode'),
                 'value': sensor.get('value')
             }
@@ -238,19 +256,19 @@ class BLNETDataHandler:
         """Discover and add new sensors."""
         added_count = 0
         for domain in ['analog', 'speed', 'power', 'energy']:
-            for sensor_id in data[domain]:
+            for sensor_id in data.get(domain, {}):
                 if self._add_single_sensor(domain, sensor_id, data):
                     added_count += 1
         return added_count
 
     def _add_single_sensor(self, domain, sensor_id, data):
         """Add a single new sensor."""
-        name = data[domain][sensor_id].get('name')
+        name = data[domain][sensor_id].get('name') or _default_name(domain, sensor_id)
         blnet_id = '{} {} {}'.format(DOMAIN, domain, sensor_id)
-        if name in self.sensors:
+        if blnet_id in self.sensors:
             return False
 
-        self.sensors.add(name)
+        self.sensors.add(blnet_id)
         _LOGGER.info(f"Discovered {domain} sensor {sensor_id} in use, adding")
 
         disc_info = {
@@ -267,19 +285,19 @@ class BLNETDataHandler:
     def _discover_digital_devices(self, data):
         """Discover and add new digital devices."""
         added_count = 0
-        for sensor_id in data['digital']:
+        for sensor_id in data.get('digital', {}):
             if self._add_digital_device(sensor_id, data):
                 added_count += 1
         return added_count
 
     def _add_digital_device(self, sensor_id, data):
         """Add a single new digital device."""
-        name = data['digital'][sensor_id].get('name')
+        name = data['digital'][sensor_id].get('name') or _default_name('digital', sensor_id)
         blnet_id = '{} digital {}'.format(DOMAIN, sensor_id)
-        if name in self.sensors:
+        if blnet_id in self.sensors:
             return False
 
-        self.sensors.add(name)
+        self.sensors.add(blnet_id)
         _LOGGER.info(f"Discovered digital sensor {sensor_id} in use, adding")
 
         disc_info = {
