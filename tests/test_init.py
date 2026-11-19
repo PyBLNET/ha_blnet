@@ -110,11 +110,11 @@ async def test_new_and_missing_values(hass, blnet, config_entry):
 
 
 async def test_not_ready(hass, blnet, config_entry):
-    blnet.cls.side_effect = ValueError("No BLNET found")
+    blnet.create.side_effect = ValueError("No BLNET found")
     await hass.config_entries.async_setup(config_entry.entry_id)
     assert config_entry.state is ConfigEntryState.SETUP_RETRY
 
-    blnet.cls.side_effect = None
+    blnet.create.side_effect = None
     blnet.fetch.side_effect = ConnectionError("Could not log in")
     await hass.config_entries.async_reload(config_entry.entry_id)
     assert config_entry.state is ConfigEntryState.SETUP_RETRY
@@ -124,6 +124,8 @@ async def test_unload(hass, blnet, config_entry):
     await _setup(hass, config_entry)
     assert await hass.config_entries.async_unload(config_entry.entry_id)
     assert config_entry.state is ConfigEntryState.NOT_LOADED
+    # the direct connection is closed
+    blnet.close.assert_awaited_once()
 
 
 async def test_import_yaml(hass, blnet):

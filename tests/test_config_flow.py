@@ -1,4 +1,7 @@
 """Tests of setting up a BL-NET in the UI."""
+from unittest.mock import ANY
+
+import aiohttp
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_RESOURCE, CONF_SCAN_INTERVAL
 from homeassistant.data_entry_flow import FlowResultType
@@ -27,21 +30,25 @@ async def test_user(hass, blnet):
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == f"{RESOURCE} (CAN node 20)"
     assert result["data"] == user_input
-    blnet.cls.assert_called_with(
-        RESOURCE, password="0128", web_port=80, ta_port=40000, use_web=True, use_ta=False
+    blnet.create.assert_called_with(
+        RESOURCE, ANY, password="0128", web_port=80, ta_port=40000, use_web=True, use_ta=False
     )
+    # the integration's own session, pyblnet sends the login cookie itself
+    session = blnet.create.call_args.args[1]
+    assert isinstance(session.cookie_jar, aiohttp.DummyCookieJar)
     blnet.fetch.assert_called_with(20)
+    blnet.close.assert_awaited()
 
 
 async def test_user_cannot_connect(hass, blnet):
-    blnet.cls.side_effect = ValueError("No BLNET found")
+    blnet.create.side_effect = ValueError("No BLNET found")
     result = await _start(hass)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], ENTRY_DATA)
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
 
     # it works once the BL-NET answers
-    blnet.cls.side_effect = None
+    blnet.create.side_effect = None
     result = await hass.config_entries.flow.async_configure(result["flow_id"], ENTRY_DATA)
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
@@ -59,7 +66,7 @@ async def test_user_no_connection(hass, blnet):
         result["flow_id"], {**ENTRY_DATA, CONF_USE_WEB: False, CONF_USE_TA: False}
     )
     assert result["errors"] == {"base": "no_connection"}
-    blnet.cls.assert_not_called()
+    blnet.create.assert_not_called()
 
 
 async def test_user_already_configured(hass, blnet, config_entry):

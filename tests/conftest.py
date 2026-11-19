@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import copy
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -68,11 +68,18 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 
 @pytest.fixture
 def blnet():
-    """A BLNET that returns WEB_DATA, set fetch.return_value to change it."""
+    """
+    The pyblnet.aio.Client that Client.create (blnet.create) returns.
+    Its fetch returns WEB_DATA, set fetch.return_value to change it.
+    """
     blnet = MagicMock()
+    for method in ("fetch", "turn_on", "turn_off", "turn_auto", "close"):
+        setattr(blnet, method, AsyncMock())
     blnet.fetch.return_value = copy.deepcopy(WEB_DATA)
-    with patch("custom_components.blnet.coordinator.BLNET", return_value=blnet) as cls:
-        blnet.cls = cls
+    with patch(
+        "custom_components.blnet.coordinator.Client.create", AsyncMock(return_value=blnet)
+    ) as create:
+        blnet.create = create
         yield blnet
 
 

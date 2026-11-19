@@ -1,16 +1,18 @@
 """Fetch the values of a BL-NET and control its digital outputs."""
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import logging
-import threading
 from typing import Any
 
-from pyblnet import BLNET
+import aiohttp
+from pyblnet.aio import Client
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_RESOURCE, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -30,14 +32,33 @@ _LOGGER = logging.getLogger(__name__)
 
 type BLNETConfigEntry = ConfigEntry[BLNETCoordinator]
 
-# One lock per BL-NET: entries reading different CAN nodes of the same BL-NET
-# must not switch its node while another one reads
-_LOCKS: dict[str, threading.Lock] = {}
+def _domain_data(hass: HomeAssistant) -> dict[str, Any]:
+    return hass.data.setdefault(DOMAIN, {})
 
 
-def blnet_lock(data: dict[str, Any]) -> threading.Lock:
-    """The lock of the BL-NET at the address in data."""
-    return _LOCKS.setdefault(data[CONF_RESOURCE], threading.Lock())
+def blnet_lock(hass: HomeAssistant, data: dict[str, Any]) -> asyncio.Lock:
+    """The lock of the BL-NET at the address in data.
+
+    Entries reading different CAN nodes of the same BL-NET must not switch
+    its node while another one reads.
+    """
+    return _domain_data(hass).setdefault("locks", {}).setdefault(
+        data[CONF_RESOURCE], asyncio.Lock()
+    )
+
+
+def blnet_session(hass: HomeAssistant) -> aiohttp.ClientSession:
+    """The HTTP session for the web interfaces of the BL-NETs.
+
+    pyblnet sends the cookie of its login itself. A cookie jar, like the one
+    of Home Assistant's shared session, could mix the logins of entries.
+    """
+    domain_data = _domain_data(hass)
+    if "session" not in domain_data:
+        domain_data["session"] = async_create_clientsession(
+            hass, cookie_jar=aiohttp.DummyCookieJar()
+        )
+    return domain_data["session"]
 
 
 def entry_title(data: dict[str, Any]) -> str:
@@ -46,10 +67,15 @@ def entry_title(data: dict[str, Any]) -> str:
     return data[CONF_RESOURCE] if node is None else f"{data[CONF_RESOURCE]} (CAN node {node})"
 
 
-def create_blnet(data: dict[str, Any]) -> BLNET:
-    """Connect to the BL-NET, raises ValueError if none answers (blocking)."""
-    return BLNET(
+async def async_create_blnet(hass: HomeAssistant, data: dict[str, Any]) -> Client:
+    """Connect to the BL-NET.
+
+    Raises ValueError if none answers at the web interface, and OSError
+    (e.g. ConnectionError, TimeoutError) if the direct connection fails.
+    """
+    return await Client.create(
         data[CONF_RESOURCE],
+        blnet_session(hass),
         password=data.get(CONF_PASSWORD) or None,
         web_port=data.get(CONF_WEB_PORT, DEFAULT_WEB_PORT),
         ta_port=data.get(CONF_TA_PORT, DEFAULT_TA_PORT),
@@ -59,11 +85,11 @@ def create_blnet(data: dict[str, Any]) -> BLNET:
 
 
 class BLNETCoordinator(DataUpdateCoordinator[dict[str, dict[int, dict[str, Any]]]]):
-    """Poll a BL-NET, the data is what BLNET.fetch returns."""
+    """Poll a BL-NET, the data is what pyblnet's Client.fetch returns."""
 
     config_entry: BLNETConfigEntry
 
-    def __init__(self, hass: HomeAssistant, entry: BLNETConfigEntry, blnet: BLNET) -> None:
+    def __init__(self, hass: HomeAssistant, entry: BLNETConfigEntry, blnet: Client) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -74,7 +100,7 @@ class BLNETCoordinator(DataUpdateCoordinator[dict[str, dict[int, dict[str, Any]]
             ),
         )
         self.blnet = blnet
-        self.lock = blnet_lock(entry.data)
+        self.lock = blnet_lock(hass, entry.data)
         self.node = entry.data.get(CONF_NODE)
         self.use_web = entry.data.get(CONF_USE_WEB, True)
         self.device_info = DeviceInfo(
@@ -87,18 +113,13 @@ class BLNETCoordinator(DataUpdateCoordinator[dict[str, dict[int, dict[str, Any]]
 
     async def _async_update_data(self) -> dict[str, dict[int, dict[str, Any]]]:
         try:
-            return await self.hass.async_add_executor_job(self._locked, self.blnet.fetch, self.node)
+            async with self.lock:
+                return await self.blnet.fetch(self.node)
         except Exception as err:  # pyblnet raises all kinds of errors
             raise UpdateFailed(f"Error fetching BL-NET values: {err}") from err
 
     async def async_set_digital(self, action: str, digital_id: int) -> None:
         """Turn a digital output on, off or to auto, then fetch its new state."""
-        await self.hass.async_add_executor_job(
-            self._locked, getattr(self.blnet, f"turn_{action}"), digital_id, self.node
-        )
+        async with self.lock:
+            await getattr(self.blnet, f"turn_{action}")(digital_id, self.node)
         await self.async_request_refresh()
-
-    def _locked(self, func, *args):
-        """Call func while no other entry talks to the BL-NET (blocking)."""
-        with self.lock:
-            return func(*args)

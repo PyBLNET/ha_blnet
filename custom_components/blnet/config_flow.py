@@ -24,7 +24,7 @@ from .const import (
     DEFAULT_WEB_PORT,
     DOMAIN,
 )
-from .coordinator import BLNETConfigEntry, blnet_lock, create_blnet, entry_title
+from .coordinator import BLNETConfigEntry, async_create_blnet, blnet_lock, entry_title
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,19 +37,6 @@ USER_SCHEMA = vol.Schema({
     vol.Required(CONF_USE_TA, default=False): bool,
     vol.Required(CONF_TA_PORT, default=DEFAULT_TA_PORT): cv.port,
 })
-
-
-class CannotConnect(Exception):
-    """No BL-NET answered."""
-
-
-def _validate(data: dict[str, Any]) -> None:
-    """Fetch the values once to check the settings (blocking)."""
-    try:
-        with blnet_lock(data):
-            create_blnet(data).fetch(data.get(CONF_NODE))
-    except (ValueError, AssertionError, OSError) as err:
-        raise CannotConnect from err
 
 
 class BLNETConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -75,8 +62,14 @@ class BLNETConfigFlow(ConfigFlow, domain=DOMAIN):
         if not user_input[CONF_USE_WEB] and not user_input[CONF_USE_TA]:
             return {"base": "no_connection"}
         try:
-            await self.hass.async_add_executor_job(_validate, user_input)
-        except CannotConnect:
+            # fetch the values once to check the settings
+            async with blnet_lock(self.hass, user_input):
+                blnet = await async_create_blnet(self.hass, user_input)
+                try:
+                    await blnet.fetch(user_input.get(CONF_NODE))
+                finally:
+                    await blnet.close()
+        except (ValueError, AssertionError, OSError):
             return {"base": "cannot_connect"}
         except Exception:
             _LOGGER.exception("Unexpected error connecting to the BL-NET")

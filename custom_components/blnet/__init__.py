@@ -31,7 +31,7 @@ from .const import (
     DIGITAL,
     DOMAIN,
 )
-from .coordinator import BLNETConfigEntry, BLNETCoordinator, create_blnet
+from .coordinator import BLNETConfigEntry, BLNETCoordinator, async_create_blnet
 from .entity import unique_id
 from .switch import mode_unique_id
 
@@ -93,12 +93,16 @@ async def _async_import(hass: HomeAssistant, yaml_config: dict) -> None:
 async def async_setup_entry(hass: HomeAssistant, entry: BLNETConfigEntry) -> bool:
     """Connect to the BL-NET and set up its entities."""
     try:
-        blnet = await hass.async_add_executor_job(create_blnet, dict(entry.data))
+        blnet = await async_create_blnet(hass, dict(entry.data))
     except (ValueError, AssertionError, OSError) as err:
         raise ConfigEntryNotReady(f"No BL-NET reached at {entry.data[CONF_RESOURCE]}") from err
 
     coordinator = BLNETCoordinator(hass, entry, blnet)
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryNotReady:
+        await blnet.close()
+        raise
     entry.runtime_data = coordinator
 
     _migrate_legacy_entities(hass, entry)
@@ -108,8 +112,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: BLNETConfigEntry) -> boo
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: BLNETConfigEntry) -> bool:
-    """Unload the entities of a BL-NET."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    """Unload the entities of a BL-NET and close its direct connection."""
+    if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        await entry.runtime_data.blnet.close()
+    return unloaded
 
 
 async def _async_reload(hass: HomeAssistant, entry: BLNETConfigEntry) -> None:
