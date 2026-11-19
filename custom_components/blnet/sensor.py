@@ -85,7 +85,8 @@ class BLNETSensor(BLNETEntity, SensorEntity):
     @property
     def native_value(self) -> float | str | None:
         value = (self.blnet_value or {}).get("value")
-        if value is None or not self._numeric:
+        if value is None or not self._numeric or isinstance(value, (int, float)):
+            # the direct connection reports numbers, e.g. speed as a level 0-30
             return value
         try:
             # the web interface reports values as strings

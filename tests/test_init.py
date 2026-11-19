@@ -43,7 +43,7 @@ async def test_web_entities(hass, blnet, config_entry):
     assert digital_input.state == "1"
     assert "state_class" not in digital_input.attributes
 
-    assert hass.states.get("sensor.bl_net_speed_1").state == "30.0"
+    assert hass.states.get("sensor.bl_net_speed_1").state == "30"
     energy = hass.states.get("sensor.bl_net_energy_1")
     assert energy.attributes["state_class"] == "total_increasing"
     assert energy.attributes["device_class"] == "energy"
