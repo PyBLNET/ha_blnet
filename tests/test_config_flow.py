@@ -5,6 +5,8 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.blnet.const import CONF_NODE, CONF_USE_TA, CONF_USE_WEB, DOMAIN
 
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
 from .conftest import ENTRY_DATA, RESOURCE
 
 
@@ -23,7 +25,7 @@ async def test_user(hass, blnet):
     result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input)
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == RESOURCE
+    assert result["title"] == f"{RESOURCE} (CAN node 20)"
     assert result["data"] == user_input
     blnet.cls.assert_called_with(
         RESOURCE, password="0128", web_port=80, ta_port=40000, use_web=True, use_ta=False
@@ -93,3 +95,57 @@ async def test_options(hass, blnet, config_entry):
     assert config_entry.options == {CONF_SCAN_INTERVAL: 60}
     # the entry is reloaded to poll at the new interval
     assert config_entry.runtime_data.update_interval.total_seconds() == 60
+
+
+async def test_user_second_can_node(hass, blnet, config_entry):
+    """Another UVR1611 behind the same BL-NET is set up by its CAN node."""
+    result = await _start(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**ENTRY_DATA, CONF_NODE: 2}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == f"{RESOURCE} (CAN node 2)"
+    blnet.fetch.assert_any_call(2)
+
+    # but each node only once
+    result = await _start(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**ENTRY_DATA, CONF_NODE: 2}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_reconfigure_can_node(hass, blnet, config_entry):
+    await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await config_entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**ENTRY_DATA, CONF_NODE: 3}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert config_entry.data[CONF_NODE] == 3
+    assert config_entry.title == f"{RESOURCE} (CAN node 3)"
+    # reloaded to read the new node
+    assert config_entry.runtime_data.node == 3
+    blnet.fetch.assert_called_with(3)
+
+
+async def test_reconfigure_to_configured_node(hass, blnet, config_entry):
+    other = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, CONF_NODE: 2})
+    other.add_to_hass(hass)
+
+    result = await config_entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**ENTRY_DATA, CONF_NODE: 2}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert CONF_NODE not in config_entry.data

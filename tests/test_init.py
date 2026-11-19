@@ -4,14 +4,14 @@ import copy
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID, CONF_RESOURCE, STATE_OFF, STATE_ON, STATE_UNAVAILABLE
-from homeassistant.helpers import entity_registry as er, issue_registry as ir
+from homeassistant.helpers import device_registry as dr, entity_registry as er, issue_registry as ir
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.blnet.const import CONF_NODE, CONF_USE_WEB, DOMAIN
 
-from .conftest import DIRECT_DATA, RESOURCE, WEB_DATA
+from .conftest import DIRECT_DATA, ENTRY_DATA, RESOURCE, WEB_DATA
 
 
 async def _setup(hass, entry):
@@ -68,14 +68,14 @@ async def test_switches(hass, blnet, config_entry):
             "switch", service, {ATTR_ENTITY_ID: entity_id}, blocking=True
         )
 
-    await call("turn_off", "switch.bl_net_pumpe")
+    await call("turn_off", "switch.bl_net_can_node_20_pumpe")
     blnet.turn_off.assert_called_once_with(1, 20)
-    await call("turn_on", "switch.bl_net_ventil")
+    await call("turn_on", "switch.bl_net_can_node_20_ventil")
     blnet.turn_on.assert_called_once_with(2, 20)
-    await call("turn_on", "switch.bl_net_ventil_automated")
+    await call("turn_on", "switch.bl_net_can_node_20_ventil_automated")
     blnet.turn_auto.assert_called_once_with(2, 20)
     # turning automation off keeps the output as it is
-    await call("turn_off", "switch.bl_net_pumpe_automated")
+    await call("turn_off", "switch.bl_net_can_node_20_pumpe_automated")
     assert blnet.turn_on.call_args_list[-1].args == (1, 20)
 
 
@@ -103,7 +103,7 @@ async def test_new_and_missing_values(hass, blnet, config_entry):
     del data["energy"][1]
     blnet.fetch.return_value = data
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=361))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert hass.states.get("sensor.bl_net_power_2").state == "0.5"
     assert hass.states.get("sensor.bl_net_energy_1").state == STATE_UNAVAILABLE
@@ -159,3 +159,14 @@ async def test_import_yaml(hass, blnet):
     # no duplicates of the moved entities
     assert hass.states.get("sensor.bl_net_energy_1") is None
     assert hass.states.get("switch.bl_net_pumpe") is None
+
+
+async def test_device_named_by_can_node(hass, blnet):
+    entry = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, CONF_NODE: 2})
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    assert device.name == "BL-NET CAN node 2"
+    blnet.fetch.assert_called_with(2)
