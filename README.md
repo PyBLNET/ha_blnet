@@ -11,7 +11,9 @@ via the BLNET web-interface into home assistant.
 
 ## Installation
 
-Add this repository to [hacs](https://hacs.xyz/) or copy the `custom_components/blnet` file structure into your custom_component directory .
+[![Open your Home Assistant instance and open this repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=PyBLNET&repository=ha_blnet&category=integration)
+
+Add this repository to [hacs](https://hacs.xyz/) with the button above or copy the `custom_components/blnet` file structure into your custom_component directory .
 
 Afterwards, restart Home Assistant and add the integration under
 **Settings → Devices & services → Add integration → BLNET**. Enter
