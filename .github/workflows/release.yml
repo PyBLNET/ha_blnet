@@ -1,0 +1,55 @@
+name: Release
+
+# Release the version in manifest.json once it lands on master, so HACS
+# picks it up. Pushes that don't bump the version find its tag and skip.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - custom_components/blnet/manifest.json
+  workflow_dispatch:
+
+# creating the tag and release needs write access, the default token is read-only
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      released: ${{ steps.version.outputs.released }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from the manifest
+        id: version
+        run: |
+          version=$(jq -r .version custom_components/blnet/manifest.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/$version" > /dev/null; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "Version $version is already tagged, nothing to release"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  tests:
+    needs: version
+    if: needs.version.outputs.released == 'false'
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    needs: [version, tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ needs.version.outputs.version }}
+          commit: ${{ github.sha }}
+          generateReleaseNotes: true
+          makeLatest: true
+          skipIfReleaseExists: true
