@@ -2,6 +2,8 @@
 
 # BLNET custom component for Home Assistant
 
+<img src="https://raw.githubusercontent.com/PyBLNET/ha_blnet/master/custom_components/blnet/brand/icon@2x.png" alt="The BLNET icon, a BL-NET with its START button, status LEDs and ports" width="128" align="right">
+
 A custom component to integrate the freely pogrammable heating controller called [UVR1611 by Technische Alternative](https://www.ta.co.at/en/freely-programmable/uvr1611/)
 via the BLNET web-interface into home assistant.
 
