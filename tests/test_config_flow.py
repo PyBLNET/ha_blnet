@@ -156,3 +156,24 @@ async def test_reconfigure_to_configured_node(hass, blnet, config_entry):
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
     assert CONF_NODE not in config_entry.data
+
+
+async def test_user_address_without_scheme(hass, blnet):
+    """An address like 10.0.0.47 is stored with http://."""
+    result = await _start(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**ENTRY_DATA, CONF_RESOURCE: " 192.168.1.10 "}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_RESOURCE] == RESOURCE
+    assert result["title"] == RESOURCE
+    assert blnet.create.call_args.args[0] == RESOURCE
+
+
+async def test_user_address_without_scheme_already_configured(hass, blnet, config_entry):
+    result = await _start(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**ENTRY_DATA, CONF_RESOURCE: "192.168.1.10"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"

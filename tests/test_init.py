@@ -172,3 +172,19 @@ async def test_device_named_by_can_node(hass, blnet):
     device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
     assert device.name == "BL-NET CAN node 2"
     blnet.fetch.assert_called_with(2)
+
+
+async def test_address_without_scheme_migrated(hass, blnet):
+    """Entries stored by 0.15.2 with a bare address get http:// added."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="192.168.1.10", data={**ENTRY_DATA, CONF_RESOURCE: "192.168.1.10"}
+    )
+    entry.add_to_hass(hass)
+    await _setup(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.data[CONF_RESOURCE] == RESOURCE
+    assert entry.title == RESOURCE
+    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    assert device.configuration_url == RESOURCE
+    assert hass.states.get("sensor.bl_net_t_kollektor").state == "55.5"

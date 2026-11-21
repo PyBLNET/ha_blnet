@@ -24,7 +24,13 @@ from .const import (
     DEFAULT_WEB_PORT,
     DOMAIN,
 )
-from .coordinator import BLNETConfigEntry, async_create_blnet, blnet_lock, entry_title
+from .coordinator import (
+    BLNETConfigEntry,
+    async_create_blnet,
+    blnet_lock,
+    entry_title,
+    with_normalized_resource,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +85,7 @@ class BLNETConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = with_normalized_resource(user_input)
             self._abort_if_configured(user_input)
             errors = await self._async_check(user_input)
             if not errors:
@@ -96,6 +103,7 @@ class BLNETConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = with_normalized_resource(user_input)
             self._abort_if_configured(user_input, ignore=entry.entry_id)
             errors = await self._async_check(user_input)
             if not errors:
@@ -112,8 +120,8 @@ class BLNETConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:
         """Import the setup from configuration.yaml, without checking the connection."""
-        self._abort_if_configured(import_data)
-        data = dict(import_data)
+        data = with_normalized_resource(import_data)
+        self._abort_if_configured(data)
         scan_interval = data.pop(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         return self.async_create_entry(
             title=entry_title(data),

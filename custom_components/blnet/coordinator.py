@@ -61,6 +61,23 @@ def blnet_session(hass: HomeAssistant) -> aiohttp.ClientSession:
     return domain_data["session"]
 
 
+def normalize_resource(resource: str) -> str:
+    """The address of a BL-NET as a URL, with http:// if no scheme is given.
+
+    Home Assistant only accepts a configuration URL with a scheme, a bare
+    address like 10.0.0.47 fails to set up the device.
+    """
+    resource = resource.strip()
+    if "://" not in resource:
+        resource = f"http://{resource}"
+    return resource
+
+
+def with_normalized_resource(data: dict[str, Any]) -> dict[str, Any]:
+    """A copy of data with the address of the BL-NET normalized."""
+    return {**data, CONF_RESOURCE: normalize_resource(data[CONF_RESOURCE])}
+
+
 def entry_title(data: dict[str, Any]) -> str:
     """Title of the entry of a BL-NET, with the CAN node if one is set."""
     node = data.get(CONF_NODE)
@@ -108,7 +125,9 @@ class BLNETCoordinator(DataUpdateCoordinator[dict[str, dict[int, dict[str, Any]]
             name="BL-NET" if self.node is None else f"BL-NET CAN node {self.node}",
             manufacturer="Technische Alternative",
             model="BL-NET",
-            configuration_url=entry.data[CONF_RESOURCE] if self.use_web else None,
+            configuration_url=(
+                normalize_resource(entry.data[CONF_RESOURCE]) if self.use_web else None
+            ),
         )
 
     async def _async_update_data(self) -> dict[str, dict[int, dict[str, Any]]]:

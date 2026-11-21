@@ -31,7 +31,13 @@ from .const import (
     DIGITAL,
     DOMAIN,
 )
-from .coordinator import BLNETConfigEntry, BLNETCoordinator, async_create_blnet
+from .coordinator import (
+    BLNETConfigEntry,
+    BLNETCoordinator,
+    async_create_blnet,
+    entry_title,
+    with_normalized_resource,
+)
 from .entity import unique_id
 from .switch import mode_unique_id
 
@@ -92,6 +98,7 @@ async def _async_import(hass: HomeAssistant, yaml_config: dict) -> None:
 
 async def async_setup_entry(hass: HomeAssistant, entry: BLNETConfigEntry) -> bool:
     """Connect to the BL-NET and set up its entities."""
+    _migrate_resource(hass, entry)
     try:
         blnet = await async_create_blnet(hass, dict(entry.data))
     except (ValueError, AssertionError, OSError) as err:
@@ -121,6 +128,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: BLNETConfigEntry) -> bo
 async def _async_reload(hass: HomeAssistant, entry: BLNETConfigEntry) -> None:
     """Apply changed options."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+@callback
+def _migrate_resource(hass: HomeAssistant, entry: BLNETConfigEntry) -> None:
+    """Add http:// to an address stored without a scheme, e.g. 10.0.0.47."""
+    data = with_normalized_resource(dict(entry.data))
+    if data == entry.data:
+        return
+    title = entry.title
+    if title == entry_title(entry.data):
+        title = entry_title(data)
+    hass.config_entries.async_update_entry(entry, data=data, title=title)
 
 
 @callback
