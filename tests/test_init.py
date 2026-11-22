@@ -39,9 +39,11 @@ async def test_web_entities(hass, blnet, config_entry):
     radiation = hass.states.get("sensor.bl_net_strahlung")
     assert radiation.attributes["device_class"] == "irradiance"
     assert radiation.attributes["icon"] == "mdi:white-balance-sunny"
-    digital_input = hass.states.get("sensor.bl_net_schalter")
-    assert digital_input.state == "1"
-    assert "state_class" not in digital_input.attributes
+    # a digital input is a binary sensor
+    assert hass.states.get("sensor.bl_net_schalter") is None
+    digital_input = hass.states.get("binary_sensor.bl_net_schalter")
+    assert digital_input.state == STATE_ON
+    assert digital_input.attributes["icon"] == "mdi:toggle-switch"
 
     assert hass.states.get("sensor.bl_net_speed_1").state == "30"
     energy = hass.states.get("sensor.bl_net_energy_1")
@@ -89,8 +91,9 @@ async def test_direct_only(hass, blnet, config_entry):
     assert hass.states.get("sensor.bl_net_analog_1").state == "21.3"
     assert hass.states.get("sensor.bl_net_energy_1").state == "12.3"
     # digital outputs can't be set without the web interface
-    assert hass.states.get("sensor.bl_net_digital_1").state == "1"
-    assert hass.states.get("sensor.bl_net_digital_2").state == "0"
+    assert hass.states.get("binary_sensor.bl_net_digital_1").state == STATE_ON
+    assert hass.states.get("binary_sensor.bl_net_digital_2").state == STATE_OFF
+    assert hass.states.get("sensor.bl_net_digital_1") is None
     assert hass.states.async_entity_ids("switch") == []
 
 
@@ -188,3 +191,85 @@ async def test_address_without_scheme_migrated(hass, blnet):
     device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
     assert device.configuration_url == RESOURCE
     assert hass.states.get("sensor.bl_net_t_kollektor").state == "55.5"
+
+
+async def _poll(hass, blnet, data):
+    blnet.fetch.reset_mock()
+    blnet.fetch.side_effect = None
+    blnet.fetch.return_value = data
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=361))
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_missing_value_keeps_name_and_state_class(hass, blnet, config_entry):
+    """A value missing from one read is unavailable, but keeps what it is."""
+    await _setup(hass, config_entry)
+    data = copy.deepcopy(WEB_DATA)
+    del data["analog"][1]
+    del data["digital"][1]
+    await _poll(hass, blnet, data)
+
+    temp = hass.states.get("sensor.bl_net_t_kollektor")
+    assert temp.state == STATE_UNAVAILABLE
+    assert temp.attributes["friendly_name"] == "BL-NET T.Kollektor"
+    assert temp.attributes["state_class"] == "measurement"
+    assert temp.attributes["unit_of_measurement"] == "°C"
+    pump = hass.states.get("switch.bl_net_pumpe")
+    assert pump.state == STATE_UNAVAILABLE
+    assert pump.attributes["friendly_name"] == "BL-NET Pumpe"
+
+    await _poll(hass, blnet, copy.deepcopy(WEB_DATA))
+    assert hass.states.get("sensor.bl_net_t_kollektor").state == "55.5"
+
+
+async def test_missing_page_read_again(hass, blnet, config_entry):
+    """A page pyblnet couldn't read is read once more."""
+    await _setup(hass, config_entry)
+    data = copy.deepcopy(WEB_DATA)
+    data["analog"] = {}
+    blnet.fetch.reset_mock()
+    blnet.fetch.side_effect = [data, copy.deepcopy(WEB_DATA)]
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=361))
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert blnet.fetch.call_count == 2
+    assert hass.states.get("sensor.bl_net_t_kollektor").state == "55.5"
+
+
+async def test_missing_page_fails_update(hass, blnet, config_entry, caplog):
+    """A page missing twice fails the update instead of dropping its values."""
+    await _setup(hass, config_entry)
+    data = copy.deepcopy(WEB_DATA)
+    data["digital"] = {}
+    await _poll(hass, blnet, data)
+
+    assert blnet.fetch.call_count == 2
+    assert config_entry.runtime_data.last_update_success is False
+    assert "reported no digital values" in caplog.text
+    assert hass.states.get("switch.bl_net_pumpe").state == STATE_UNAVAILABLE
+    assert hass.states.get("sensor.bl_net_t_kollektor").state == STATE_UNAVAILABLE
+
+    await _poll(hass, blnet, copy.deepcopy(WEB_DATA))
+    assert hass.states.get("switch.bl_net_pumpe").state == STATE_ON
+
+
+async def test_digital_input_sensor_migrated(hass, blnet, config_entry):
+    """The sensor of a digital input up to 0.15 becomes a binary sensor."""
+    registry = er.async_get(hass)
+    old = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{config_entry.entry_id}_analog_5",
+        config_entry=config_entry,
+        suggested_object_id="heizung_schalter",
+    )
+    registry.async_update_entity(old.entity_id, name="Mein Schalter")
+    await _setup(hass, config_entry)
+
+    assert registry.async_get(old.entity_id) is None
+    state = hass.states.get("binary_sensor.heizung_schalter")
+    assert state.state == STATE_ON
+    assert state.attributes["friendly_name"] == "Mein Schalter"
+    assert registry.async_get("binary_sensor.heizung_schalter").unique_id == (
+        f"{config_entry.entry_id}_analog_5"
+    )

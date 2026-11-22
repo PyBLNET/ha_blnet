@@ -25,6 +25,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TA_PORT,
     DEFAULT_WEB_PORT,
+    DIGITAL,
     DOMAIN,
 )
 
@@ -133,9 +134,33 @@ class BLNETCoordinator(DataUpdateCoordinator[dict[str, dict[int, dict[str, Any]]
     async def _async_update_data(self) -> dict[str, dict[int, dict[str, Any]]]:
         try:
             async with self.lock:
-                return await self.blnet.fetch(self.node)
+                data = await self.blnet.fetch(self.node)
+                if self._missing_pages(data):
+                    _LOGGER.debug(
+                        "The BL-NET reported no %s values, reading again",
+                        " and ".join(self._missing_pages(data)),
+                    )
+                    data = await self.blnet.fetch(self.node)
         except Exception as err:  # pyblnet raises all kinds of errors
             raise UpdateFailed(f"Error fetching BL-NET values: {err}") from err
+        if missing := self._missing_pages(data):
+            raise UpdateFailed(
+                f"The BL-NET reported no {' and '.join(missing)} values, e.g. because"
+                " another login to its web interface ended the one of Home Assistant"
+            )
+        return data
+
+    def _missing_pages(self, data: dict[str, dict[int, dict[str, Any]]]) -> list[str]:
+        """The pages of the web interface that had values before, but none now.
+
+        pyblnet reports a page it can't read, e.g. after a timeout or when
+        access is denied, as no values. That isn't the UVR1611 losing them.
+        """
+        if not self.use_web or not self.data:
+            return []
+        return [
+            domain for domain in ("analog", DIGITAL) if self.data.get(domain) and not data.get(domain)
+        ]
 
     async def async_set_digital(self, action: str, digital_id: int) -> None:
         """Turn a digital output on, off or to auto, then fetch its new state."""

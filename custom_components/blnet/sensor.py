@@ -16,9 +16,9 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DIGITAL, SENSOR_DOMAINS
+from .const import SENSOR_DOMAINS
 from .coordinator import BLNETConfigEntry, BLNETCoordinator
-from .entity import BLNETEntity, new_values
+from .entity import BLNETEntity, is_binary, new_values
 
 # Units the BL-NET reports in another spelling than Home Assistant
 UNITS = {"l/h": UnitOfVolumeFlowRate.LITERS_PER_HOUR}
@@ -36,7 +36,6 @@ ICONS = {
     "speed": "mdi:speedometer",
     "power": "mdi:power-plug",
     "energy": "mdi:power-plug",
-    DIGITAL: "mdi:toggle-switch",
 }
 
 # Icons of analog inputs by the input type pyblnet reports
@@ -44,7 +43,6 @@ TYPE_ICONS = {
     "temperature": "mdi:thermometer",
     "volume_flow": "mdi:water-pump",
     "radiation": "mdi:white-balance-sunny",
-    "digital": "mdi:toggle-switch",
 }
 
 
@@ -53,16 +51,17 @@ async def async_setup_entry(
     entry: BLNETConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Add a sensor for every value, and for digital outputs without the web interface."""
+    """Add a sensor for every measured value, digital ones are binary sensors."""
     coordinator = entry.runtime_data
-    domains = SENSOR_DOMAINS if coordinator.use_web else (*SENSOR_DOMAINS, DIGITAL)
     known: set[tuple[str, int]] = set()
 
     @callback
     def add_new_sensors() -> None:
         async_add_entities(
             BLNETSensor(coordinator, domain, value_id)
-            for domain, value_id in new_values(coordinator, domains, known)
+            for domain, value_id in new_values(
+                coordinator, SENSOR_DOMAINS, known, lambda domain, value: not is_binary(domain, value)
+            )
         )
 
     add_new_sensors()
@@ -77,15 +76,9 @@ class BLNETSensor(BLNETEntity, SensorEntity):
         return self.value_name
 
     @property
-    def _numeric(self) -> bool:
-        """Whether the value is a number, and not the state of a digital input or output."""
-        value = self.blnet_value or {}
-        return self._domain != DIGITAL and value.get("type") != "digital"
-
-    @property
-    def native_value(self) -> float | str | None:
+    def native_value(self) -> float | None:
         value = (self.blnet_value or {}).get("value")
-        if value is None or not self._numeric or isinstance(value, (int, float)):
+        if value is None or isinstance(value, (int, float)):
             # the direct connection reports numbers, e.g. speed as a level 0-30
             return value
         try:
@@ -96,7 +89,7 @@ class BLNETSensor(BLNETEntity, SensorEntity):
 
     @property
     def native_unit_of_measurement(self) -> str | None:
-        unit = (self.blnet_value or {}).get("unit_of_measurement")
+        unit = self._last_value.get("unit_of_measurement")
         return UNITS.get(unit, unit)
 
     @property
@@ -104,9 +97,7 @@ class BLNETSensor(BLNETEntity, SensorEntity):
         return DEVICE_CLASSES.get(self.native_unit_of_measurement)
 
     @property
-    def state_class(self) -> SensorStateClass | None:
-        if not self._numeric:
-            return None
+    def state_class(self) -> SensorStateClass:
         if self._domain == "energy":
             return SensorStateClass.TOTAL_INCREASING
         return SensorStateClass.MEASUREMENT
@@ -114,6 +105,6 @@ class BLNETSensor(BLNETEntity, SensorEntity):
     @property
     def icon(self) -> str:
         if self._domain == "analog":
-            value_type = (self.blnet_value or {}).get("type")
+            value_type = self._last_value.get("type")
             return TYPE_ICONS.get(value_type, ICONS["analog"])
         return ICONS[self._domain]

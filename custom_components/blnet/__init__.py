@@ -43,7 +43,7 @@ from .switch import mode_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
 
 # The configuration.yaml setup, imported into a config entry
 CONFIG_SCHEMA = vol.Schema({
