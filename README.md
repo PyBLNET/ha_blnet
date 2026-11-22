@@ -26,10 +26,6 @@ Afterwards, restart Home Assistant and add the integration under
 The poll interval (default 360 seconds) can be changed under the integration's **Configure** button.
 The address, password, CAN node and connections can be changed later with **Reconfigure** in the entry's menu.
 
-Every value becomes a sensor, digital inputs become binary sensors, and digital outputs become a switch
-plus a second switch for their automatic (AUTO) mode. Without the web interface, digital outputs are binary sensors.
-Since 0.16.0, digital inputs are binary sensors instead of sensors: they keep their name, but their entity id
-changes from `sensor.…` to `binary_sensor.…`, so update automations and dashboards that use them.
 
 ![The device of a BL-NET with its switches and sensors](https://raw.githubusercontent.com/PyBLNET/ha_blnet/master/docs/device.png)
 
