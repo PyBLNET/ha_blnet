@@ -35,6 +35,7 @@ from .coordinator import (
     BLNETConfigEntry,
     BLNETCoordinator,
     async_create_blnet,
+    entry_timeout,
     entry_title,
     with_normalized_resource,
 )
@@ -100,7 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: BLNETConfigEntry) -> boo
     """Connect to the BL-NET and set up its entities."""
     _migrate_resource(hass, entry)
     try:
-        blnet = await async_create_blnet(hass, dict(entry.data))
+        blnet = await async_create_blnet(hass, dict(entry.data), entry_timeout(entry))
     except (ValueError, AssertionError, OSError) as err:
         raise ConfigEntryNotReady(f"No BL-NET reached at {entry.data[CONF_RESOURCE]}") from err
 

@@ -11,6 +11,8 @@ CONF_NODE = "can_node"
 DEFAULT_WEB_PORT = 80
 DEFAULT_TA_PORT = 40000
 DEFAULT_SCAN_INTERVAL = 360
+# seconds a page of the web interface may take, a BL-NET can take ~5 s for one
+DEFAULT_TIMEOUT = 30
 
 # Domains of the values pyblnet fetches that become sensors
 SENSOR_DOMAINS = ("analog", "speed", "power", "energy")

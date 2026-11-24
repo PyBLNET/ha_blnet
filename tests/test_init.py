@@ -246,6 +246,7 @@ async def test_missing_page_fails_update(hass, blnet, config_entry, caplog):
     assert blnet.fetch.call_count == 2
     assert config_entry.runtime_data.last_update_success is False
     assert "reported no digital values" in caplog.text
+    assert "timeout of 30 s" in caplog.text
     assert hass.states.get("switch.bl_net_pumpe").state == STATE_UNAVAILABLE
     assert hass.states.get("sensor.bl_net_t_kollektor").state == STATE_UNAVAILABLE
 

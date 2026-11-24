@@ -3,7 +3,7 @@ from unittest.mock import ANY
 
 import aiohttp
 from homeassistant import config_entries
-from homeassistant.const import CONF_PASSWORD, CONF_RESOURCE, CONF_SCAN_INTERVAL
+from homeassistant.const import CONF_PASSWORD, CONF_RESOURCE, CONF_SCAN_INTERVAL, CONF_TIMEOUT
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.blnet.const import CONF_NODE, CONF_USE_TA, CONF_USE_WEB, DOMAIN
@@ -31,7 +31,14 @@ async def test_user(hass, blnet):
     assert result["title"] == f"{RESOURCE} (CAN node 20)"
     assert result["data"] == user_input
     blnet.create.assert_called_with(
-        RESOURCE, ANY, password="0128", web_port=80, ta_port=40000, use_web=True, use_ta=False
+        RESOURCE,
+        ANY,
+        password="0128",
+        timeout=30,
+        web_port=80,
+        ta_port=40000,
+        use_web=True,
+        use_ta=False,
     )
     # the integration's own session, pyblnet sends the login cookie itself
     session = blnet.create.call_args.args[1]
@@ -94,14 +101,28 @@ async def test_options(hass, blnet, config_entry):
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
     assert result["type"] is FlowResultType.FORM
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_SCAN_INTERVAL: 60}
+        result["flow_id"], {CONF_SCAN_INTERVAL: 60, CONF_TIMEOUT: 45}
     )
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert config_entry.options == {CONF_SCAN_INTERVAL: 60}
-    # the entry is reloaded to poll at the new interval
+    assert config_entry.options == {CONF_SCAN_INTERVAL: 60, CONF_TIMEOUT: 45}
+    # the entry is reloaded to poll at the new interval, with the new timeout
     assert config_entry.runtime_data.update_interval.total_seconds() == 60
+    assert blnet.create.call_args.kwargs["timeout"] == 45
+
+
+async def test_options_timeout_default(hass, blnet, config_entry):
+    """Entries from before the timeout option get 30 s, also in the form."""
+    await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert blnet.create.call_args.kwargs["timeout"] == 30
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_SCAN_INTERVAL: 360}
+    )
+    assert config_entry.options == {CONF_SCAN_INTERVAL: 360, CONF_TIMEOUT: 30}
 
 
 async def test_user_second_can_node(hass, blnet, config_entry):

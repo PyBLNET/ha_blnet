@@ -54,7 +54,11 @@
     "step": {
       "init": {
         "data": {
-          "scan_interval": "Poll interval (seconds)"
+          "scan_interval": "Poll interval (seconds)",
+          "timeout": "Timeout (seconds)"
+        },
+        "data_description": {
+          "timeout": "How long reading a page of the web interface may take. Raise it if values go unavailable now and then."
         }
       }
     }

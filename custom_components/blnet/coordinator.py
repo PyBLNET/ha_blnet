@@ -10,7 +10,7 @@ import aiohttp
 from pyblnet.aio import Client
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_PASSWORD, CONF_RESOURCE, CONF_SCAN_INTERVAL
+from homeassistant.const import CONF_PASSWORD, CONF_RESOURCE, CONF_SCAN_INTERVAL, CONF_TIMEOUT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -24,6 +24,7 @@ from .const import (
     CONF_WEB_PORT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TA_PORT,
+    DEFAULT_TIMEOUT,
     DEFAULT_WEB_PORT,
     DIGITAL,
     DOMAIN,
@@ -79,14 +80,21 @@ def with_normalized_resource(data: dict[str, Any]) -> dict[str, Any]:
     return {**data, CONF_RESOURCE: normalize_resource(data[CONF_RESOURCE])}
 
 
+def entry_timeout(entry: ConfigEntry) -> int:
+    """Seconds a request to the BL-NET of the entry may take."""
+    return entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
+
+
 def entry_title(data: dict[str, Any]) -> str:
     """Title of the entry of a BL-NET, with the CAN node if one is set."""
     node = data.get(CONF_NODE)
     return data[CONF_RESOURCE] if node is None else f"{data[CONF_RESOURCE]} (CAN node {node})"
 
 
-async def async_create_blnet(hass: HomeAssistant, data: dict[str, Any]) -> Client:
-    """Connect to the BL-NET.
+async def async_create_blnet(
+    hass: HomeAssistant, data: dict[str, Any], timeout: int = DEFAULT_TIMEOUT
+) -> Client:
+    """Connect to the BL-NET, timeout is how many seconds a request may take.
 
     Raises ValueError if none answers at the web interface, and OSError
     (e.g. ConnectionError, TimeoutError) if the direct connection fails.
@@ -95,6 +103,7 @@ async def async_create_blnet(hass: HomeAssistant, data: dict[str, Any]) -> Clien
         data[CONF_RESOURCE],
         blnet_session(hass),
         password=data.get(CONF_PASSWORD) or None,
+        timeout=timeout,
         web_port=data.get(CONF_WEB_PORT, DEFAULT_WEB_PORT),
         ta_port=data.get(CONF_TA_PORT, DEFAULT_TA_PORT),
         use_web=data.get(CONF_USE_WEB, True),
@@ -121,6 +130,7 @@ class BLNETCoordinator(DataUpdateCoordinator[dict[str, dict[int, dict[str, Any]]
         self.lock = blnet_lock(hass, entry.data)
         self.node = entry.data.get(CONF_NODE)
         self.use_web = entry.data.get(CONF_USE_WEB, True)
+        self.timeout = entry_timeout(entry)
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name="BL-NET" if self.node is None else f"BL-NET CAN node {self.node}",
@@ -145,8 +155,9 @@ class BLNETCoordinator(DataUpdateCoordinator[dict[str, dict[int, dict[str, Any]]
             raise UpdateFailed(f"Error fetching BL-NET values: {err}") from err
         if missing := self._missing_pages(data):
             raise UpdateFailed(
-                f"The BL-NET reported no {' and '.join(missing)} values, e.g. because"
-                " another login to its web interface ended the one of Home Assistant"
+                f"The BL-NET reported no {' and '.join(missing)} values, e.g. because a page"
+                f" took longer than the timeout of {self.timeout} s, which can be raised"
+                " under Configure, or another login to its web interface ended this one"
             )
         return data
 

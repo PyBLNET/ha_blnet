@@ -7,7 +7,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
-from homeassistant.const import CONF_PASSWORD, CONF_RESOURCE, CONF_SCAN_INTERVAL
+from homeassistant.const import CONF_PASSWORD, CONF_RESOURCE, CONF_SCAN_INTERVAL, CONF_TIMEOUT
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.helpers import config_validation as cv
@@ -21,6 +21,7 @@ from .const import (
     CONF_WEB_PORT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TA_PORT,
+    DEFAULT_TIMEOUT,
     DEFAULT_WEB_PORT,
     DOMAIN,
 )
@@ -136,7 +137,7 @@ class BLNETConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class BLNETOptionsFlow(OptionsFlow):
-    """Change how often the BL-NET is polled."""
+    """Change how often the BL-NET is polled, and how long a request may take."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
@@ -144,6 +145,9 @@ class BLNETOptionsFlow(OptionsFlow):
         schema = vol.Schema({
             vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
                 vol.Coerce(int), vol.Range(min=10)
+            ),
+            vol.Required(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): vol.All(
+                vol.Coerce(int), vol.Range(min=1)
             ),
         })
         return self.async_show_form(
